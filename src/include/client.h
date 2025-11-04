@@ -174,23 +174,76 @@ void Decide() {
       }
     }
     
-    // Phase 2: Pattern matching for common configurations
-    // Pattern: 1-2-1 or 1-1 patterns
+    // Phase 2: Pattern matching and additional constraint propagation
     for (int i = 0; i < rows; i++) {
       for (int j = 0; j < columns; j++) {
-        if (is_visited_cell[i][j] && map_state[i][j] == '1') {
-          // Check for 1-2-1 pattern horizontally
-          if (j + 2 < columns && is_visited_cell[i][j+2] && map_state[i][j+2] == '1' &&
+        if (is_visited_cell[i][j] && map_state[i][j] >= '1' && map_state[i][j] <= '8') {
+          int mc = map_state[i][j] - '0';
+          int rem = mc - marked_neighbors[i][j];
+          
+          // Pattern: 1-2-1 horizontal
+          if (mc == 1 && j + 2 < columns && is_visited_cell[i][j+2] && map_state[i][j+2] == '1' &&
               is_visited_cell[i][j+1] && map_state[i][j+1] == '2') {
-            // Middle cell neighbors (not shared with edges) are safe
             if (i > 0 && map_state[i-1][j+1] == '?') is_safe[i-1][j+1] = true;
             if (i < rows-1 && map_state[i+1][j+1] == '?') is_safe[i+1][j+1] = true;
           }
-          // Check for 1-2-1 pattern vertically
-          if (i + 2 < rows && is_visited_cell[i+2][j] && map_state[i+2][j] == '1' &&
+          // Pattern: 1-2-1 vertical
+          if (mc == 1 && i + 2 < rows && is_visited_cell[i+2][j] && map_state[i+2][j] == '1' &&
               is_visited_cell[i+1][j] && map_state[i+1][j] == '2') {
             if (j > 0 && map_state[i+1][j-1] == '?') is_safe[i+1][j-1] = true;
             if (j < columns-1 && map_state[i+1][j+1] == '?') is_safe[i+1][j+1] = true;
+          }
+          
+          // Pattern: 1-2 edge  configurations
+          if (mc == 2 && rem > 0) {
+            // Check for adjacent 1s that share unknowns
+            for (int di = -1; di <= 1; di++) {
+              for (int dj = -1; dj <= 1; dj++) {
+                if (di == 0 && dj == 0) continue;
+                int ni = i + di, nj = j + dj;
+                if (ni >= 0 && ni < rows && nj >= 0 && nj < columns) {
+                  if (is_visited_cell[ni][nj] && map_state[ni][nj] == '1') {
+                    int rem_neighbor = 1 - marked_neighbors[ni][nj];
+                    if (rem_neighbor == 1) {
+                      // The 1 needs exactly 1 mine, the 2 needs rem mines
+                      // Check if they share unknowns
+                      int shared_unknowns = 0;
+                      for (int di2 = -1; di2 <= 1; di2++) {
+                        for (int dj2 = -1; dj2 <= 1; dj2++) {
+                          if (di2 == 0 && dj2 == 0) continue;
+                          int ci = i + di2, cj = j + dj2;
+                          if (ci >= 0 && ci < rows && cj >= 0 && cj < columns && map_state[ci][cj] == '?') {
+                            // Check if also neighbor of the 1
+                            if (abs(ci - ni) <= 1 && abs(cj - nj) <= 1) {
+                              shared_unknowns++;
+                            }
+                          }
+                        }
+                      }
+                      // Apply deduction if pattern matches
+                      if (shared_unknowns > 0 && unknown_neighbors[ni][nj] == shared_unknowns) {
+                        // The 1's mine must be in shared area
+                        // So (2's unknowns - shared) can have at most (rem-1) mines
+                        if (rem == 1) {
+                          // All of 2's unique unknowns are safe
+                          for (int di2 = -1; di2 <= 1; di2++) {
+                            for (int dj2 = -1; dj2 <= 1; dj2++) {
+                              if (di2 == 0 && dj2 == 0) continue;
+                              int ci = i + di2, cj = j + dj2;
+                              if (ci >= 0 && ci < rows && cj >= 0 && cj < columns && map_state[ci][cj] == '?') {
+                                if (abs(ci - ni) > 1 || abs(cj - nj) > 1) {
+                                  is_safe[ci][cj] = true;
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
