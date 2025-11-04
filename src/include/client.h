@@ -217,7 +217,113 @@ void Decide() {
     }
   }
   
-  // Step 3: Try auto-explore on cells where all mines are marked
+  // Step 3: Simple subset constraint deduction
+  // Look for pairs of cells where one's unknowns are subset of another's
+  for (int i1 = 0; i1 < rows; i1++) {
+    for (int j1 = 0; j1 < columns; j1++) {
+      if (!is_visited_cell[i1][j1] || map_state[i1][j1] < '1' || map_state[i1][j1] > '8') continue;
+      
+      int mc1 = map_state[i1][j1] - '0';
+      int rem1 = mc1 - marked_neighbors[i1][j1];
+      if (rem1 <= 0) continue;
+      
+      // Get unknown neighbors of cell1
+      int unknowns1[8][2], unk1_count = 0;
+      for (int di = -1; di <= 1; di++) {
+        for (int dj = -1; dj <= 1; dj++) {
+          if (di == 0 && dj == 0) continue;
+          int ni = i1 + di, nj = j1 + dj;
+          if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+            unknowns1[unk1_count][0] = ni;
+            unknowns1[unk1_count][1] = nj;
+            unk1_count++;
+          }
+        }
+      }
+      
+      // Check nearby cells
+      for (int i2 = i1 - 2; i2 <= i1 + 2 && i2 < rows; i2++) {
+        for (int j2 = j1 - 2; j2 <= j1 + 2 && j2 < columns; j2++) {
+          if (i2 < 0 || (i2 == i1 && j2 == j1)) continue;
+          if (!is_visited_cell[i2][j2] || map_state[i2][j2] < '1' || map_state[i2][j2] > '8') continue;
+          
+          int mc2 = map_state[i2][j2] - '0';
+          int rem2 = mc2 - marked_neighbors[i2][j2];
+          if (rem2 <= 0) continue;
+          
+          // Get unknown neighbors of cell2
+          int unknowns2[8][2], unk2_count = 0;
+          for (int di = -1; di <= 1; di++) {
+            for (int dj = -1; dj <= 1; dj++) {
+              if (di == 0 && dj == 0) continue;
+              int ni = i2 + di, nj = j2 + dj;
+              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+                unknowns2[unk2_count][0] = ni;
+                unknowns2[unk2_count][1] = nj;
+                unk2_count++;
+              }
+            }
+          }
+          
+          // Check if unknowns1 is subset of unknowns2
+          bool is_subset = true;
+          for (int k = 0; k < unk1_count; k++) {
+            bool found = false;
+            for (int m = 0; m < unk2_count; m++) {
+              if (unknowns1[k][0] == unknowns2[m][0] && unknowns1[k][1] == unknowns2[m][1]) {
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              is_subset = false;
+              break;
+            }
+          }
+          
+          if (is_subset && unk1_count < unk2_count) {
+            // unknowns1 ? unknowns2, so unknowns2 - unknowns1 has (rem2 - rem1) mines
+            int diff_mines = rem2 - rem1;
+            int diff_count = unk2_count - unk1_count;
+            
+            if (diff_mines == diff_count && diff_count > 0) {
+              // All cells in (unknowns2 - unknowns1) are mines
+              for (int m = 0; m < unk2_count; m++) {
+                bool in_both = false;
+                for (int k = 0; k < unk1_count; k++) {
+                  if (unknowns2[m][0] == unknowns1[k][0] && unknowns2[m][1] == unknowns1[k][1]) {
+                    in_both = true;
+                    break;
+                  }
+                }
+                if (!in_both) {
+                  Execute(unknowns2[m][0], unknowns2[m][1], 1);
+                  return;
+                }
+              }
+            } else if (diff_mines == 0 && diff_count > 0) {
+              // All cells in (unknowns2 - unknowns1) are safe
+              for (int m = 0; m < unk2_count; m++) {
+                bool in_both = false;
+                for (int k = 0; k < unk1_count; k++) {
+                  if (unknowns2[m][0] == unknowns1[k][0] && unknowns2[m][1] == unknowns1[k][1]) {
+                    in_both = true;
+                    break;
+                  }
+                }
+                if (!in_both) {
+                  Execute(unknowns2[m][0], unknowns2[m][1], 0);
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Step 4: Try auto-explore on cells where all mines are marked
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < columns; j++) {
       if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
