@@ -230,93 +230,15 @@ void Decide() {
     }
   }
   
-  // Step 4: Subset constraint solving
-  // Look for overlapping constraints that can deduce mine locations
-  for (int i1 = 0; i1 < rows; i1++) {
-    for (int j1 = 0; j1 < columns; j1++) {
-      if (!is_visited_cell[i1][j1] || map_state[i1][j1] < '1' || map_state[i1][j1] > '8') continue;
-      
-      int mc1 = map_state[i1][j1] - '0';
-      int rem1 = mc1 - marked_neighbors[i1][j1];
-      if (rem1 <= 0 || unknown_neighbors[i1][j1] <= 0) continue;
-      
-      // Check for nearby cells with overlapping unknown neighbors
-      for (int i2 = i1 - 2; i2 <= i1 + 2; i2++) {
-        for (int j2 = j1 - 2; j2 <= j1 + 2; j2++) {
-          if (i2 < 0 || i2 >= rows || j2 < 0 || j2 >= columns) continue;
-          if (i2 == i1 && j2 == j1) continue;
-          if (!is_visited_cell[i2][j2] || map_state[i2][j2] < '1' || map_state[i2][j2] > '8') continue;
-          
-          int mc2 = map_state[i2][j2] - '0';
-          int rem2 = mc2 - marked_neighbors[i2][j2];
-          if (rem2 <= 0 || unknown_neighbors[i2][j2] <= 0) continue;
-          
-          // Find shared and unique unknown neighbors
-          int shared = 0, unique1 = 0, unique2 = 0;
-          bool has_unique1[8] = {false}, has_unique2[8] = {false};
-          int unique1_pos[8][2], unique2_pos[8][2];
-          
-          for (int di = -1; di <= 1; di++) {
-            for (int dj = -1; dj <= 1; dj++) {
-              if (di == 0 && dj == 0) continue;
-              int ni = i1 + di, nj = j1 + dj;
-              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
-                bool is_neighbor2 = (abs(ni - i2) <= 1 && abs(nj - j2) <= 1);
-                if (is_neighbor2) {
-                  shared++;
-                } else {
-                  unique1_pos[unique1][0] = ni;
-                  unique1_pos[unique1][1] = nj;
-                  unique1++;
-                }
-              }
-            }
-          }
-          
-          for (int di = -1; di <= 1; di++) {
-            for (int dj = -1; dj <= 1; dj++) {
-              if (di == 0 && dj == 0) continue;
-              int ni = i2 + di, nj = j2 + dj;
-              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
-                bool is_neighbor1 = (abs(ni - i1) <= 1 && abs(nj - j1) <= 1);
-                if (!is_neighbor1) {
-                  unique2_pos[unique2][0] = ni;
-                  unique2_pos[unique2][1] = nj;
-                  unique2++;
-                }
-              }
-            }
-          }
-          
-          // Check if cell1's constraint minus shared equals unique1 (all unique1 are mines)
-          if (rem1 == unique1 + shared && unique1 > 0 && rem2 <= shared) {
-            for (int k = 0; k < unique1; k++) {
-              int ni = unique1_pos[k][0], nj = unique1_pos[k][1];
-              Execute(ni, nj, 1);
-              return;
-            }
-          }
-          
-          // Check if all of cell1's mines are in shared (unique2 are safe)
-          if (rem1 <= shared && unique2 > 0) {
-            for (int k = 0; k < unique2; k++) {
-              int ni = unique2_pos[k][0], nj = unique2_pos[k][1];
-              Execute(ni, nj, 0);
-              return;
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  // Step 5: Probability-based guessing with improved heuristics
+  // Step 4: Improved probability-based guessing
+  // Calculate mine probability for each unknown cell more accurately
   int best_i = -1, best_j = -1;
   double min_mine_prob = 2.0;
   
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < columns; j++) {
       if (map_state[i][j] == '?') {
+        // Calculate mine probability using average of individual probabilities
         double prob_sum = 0.0;
         int constraint_count = 0;
         
@@ -331,6 +253,7 @@ void Decide() {
                 int unknown = unknown_neighbors[ni][nj];
                 
                 if (unknown > 0) {
+                  // Each constraint gives an independent probability estimate
                   prob_sum += (double)remaining / unknown;
                   constraint_count++;
                 }
@@ -339,14 +262,24 @@ void Decide() {
           }
         }
         
+        // Average the probability estimates
         double prob = (constraint_count > 0) ? prob_sum / constraint_count : 0.5;
         
-        // Strong preference for corners and edges
+        // Apply heuristics: prefer corners and edges (statistically safer)
         bool is_corner = (i == 0 || i == rows-1) && (j == 0 || j == columns-1);
         bool is_edge = (i == 0 || i == rows-1 || j == 0 || j == columns-1);
         
-        if (is_corner) prob *= 0.6;
-        else if (is_edge) prob *= 0.75;
+        // Stronger preference for cells with no constraints (far from frontier)
+        if (constraint_count == 0) {
+          prob = 0.3;  // Assume lower mine density in unexplored areas
+        }
+        
+        if (is_corner) prob *= 0.65;
+        else if (is_edge) prob *= 0.80;
+        
+        // Prefer cells with more constraints (more information)
+        double confidence_bonus = 1.0 / (1.0 + constraint_count * 0.1);
+        prob *= confidence_bonus;
         
         if (prob < min_mine_prob) {
           min_mine_prob = prob;
