@@ -10,6 +10,13 @@ extern int total_mines;  // The count of mines of the game map.
 
 // You MUST NOT use any other external variables except for rows, columns and total_mines.
 
+// Custom global variables for client state
+char map_state[35][35];  // Current state of each cell ('?', '0'-'8', '@', 'X')
+bool is_known_mine[35][35];  // Whether we know a cell is a mine
+bool is_visited_cell[35][35];  // Whether a cell has been visited
+int unknown_neighbors[35][35];  // Count of unknown neighbors for each cell
+int marked_neighbors[35][35];   // Count of marked neighbors for each cell
+
 /**
  * @brief The definition of function Execute(int, int, bool)
  *
@@ -34,7 +41,17 @@ void Execute(int r, int c, int type);
  * will read the scale of the game map and the first step taken by the server (see README).
  */
 void InitGame() {
-  // TODO (student): Initialize all your global variables!
+  // Initialize all custom global variables
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      map_state[i][j] = '?';
+      is_known_mine[i][j] = false;
+      is_visited_cell[i][j] = false;
+      unknown_neighbors[i][j] = 0;
+      marked_neighbors[i][j] = 0;
+    }
+  }
+  
   int first_row, first_column;
   std::cin >> first_row >> first_column;
   Execute(first_row, first_column, 0);
@@ -51,7 +68,48 @@ void InitGame() {
  *     01?
  */
 void ReadMap() {
-  // TODO (student): Implement me!
+  // Read the map and update our state
+  for (int i = 0; i < rows; i++) {
+    std::string line;
+    std::cin >> line;
+    for (int j = 0; j < columns; j++) {
+      map_state[i][j] = line[j];
+      
+      // Update visited status
+      if (line[j] >= '0' && line[j] <= '8') {
+        is_visited_cell[i][j] = true;
+      } else if (line[j] == '@') {
+        is_known_mine[i][j] = true;
+      } else if (line[j] == 'X') {
+        // Hit a mine or marked wrong
+        is_visited_cell[i][j] = true;
+      }
+    }
+  }
+  
+  // Update neighbor counts for all visited cells
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
+        int unknown = 0, marked = 0;
+        for (int di = -1; di <= 1; di++) {
+          for (int dj = -1; dj <= 1; dj++) {
+            if (di == 0 && dj == 0) continue;
+            int ni = i + di, nj = j + dj;
+            if (ni >= 0 && ni < rows && nj >= 0 && nj < columns) {
+              if (map_state[ni][nj] == '?') {
+                unknown++;
+              } else if (map_state[ni][nj] == '@') {
+                marked++;
+              }
+            }
+          }
+        }
+        unknown_neighbors[i][j] = unknown;
+        marked_neighbors[i][j] = marked;
+      }
+    }
+  }
 }
 
 /**
@@ -61,10 +119,112 @@ void ReadMap() {
  * mind and make your decision here! Caution: you can only execute once in this function.
  */
 void Decide() {
-  // TODO (student): Implement me!
-  // while (true) {
-  //   Execute(0, 0);
-  // }
+  // Strategy: Use logical deduction to find safe moves
+  
+  // Step 1: Find cells we can safely mark as mines
+  // If a numbered cell has N unknown neighbors and needs N more mines, mark all unknown as mines
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
+        int mine_count = map_state[i][j] - '0';
+        int remaining_mines = mine_count - marked_neighbors[i][j];
+        
+        if (remaining_mines > 0 && remaining_mines == unknown_neighbors[i][j]) {
+          // All unknown neighbors must be mines
+          for (int di = -1; di <= 1; di++) {
+            for (int dj = -1; dj <= 1; dj++) {
+              if (di == 0 && dj == 0) continue;
+              int ni = i + di, nj = j + dj;
+              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+                Execute(ni, nj, 1);  // Mark as mine
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Step 2: Find cells we can safely visit
+  // If a numbered cell has all its mines marked, we can safely visit all unknown neighbors
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
+        int mine_count = map_state[i][j] - '0';
+        
+        if (mine_count == marked_neighbors[i][j] && unknown_neighbors[i][j] > 0) {
+          // All mines found, safe to visit unknown neighbors
+          for (int di = -1; di <= 1; di++) {
+            for (int dj = -1; dj <= 1; dj++) {
+              if (di == 0 && dj == 0) continue;
+              int ni = i + di, nj = j + dj;
+              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+                Execute(ni, nj, 0);  // Visit
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Step 3: Try auto-explore on visited cells
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
+        int mine_count = map_state[i][j] - '0';
+        if (mine_count > 0 && mine_count == marked_neighbors[i][j] && unknown_neighbors[i][j] > 0) {
+          Execute(i, j, 2);  // Auto-explore
+          return;
+        }
+      }
+    }
+  }
+  
+  // Step 4: If no obvious safe move, visit a corner or edge cell (safer statistically)
+  // Try corners first
+  int corners[4][2] = {{0, 0}, {0, columns-1}, {rows-1, 0}, {rows-1, columns-1}};
+  for (int k = 0; k < 4; k++) {
+    int ci = corners[k][0], cj = corners[k][1];
+    if (map_state[ci][cj] == '?') {
+      Execute(ci, cj, 0);
+      return;
+    }
+  }
+  
+  // Try edges
+  for (int i = 0; i < rows; i++) {
+    if (map_state[i][0] == '?') {
+      Execute(i, 0, 0);
+      return;
+    }
+    if (map_state[i][columns-1] == '?') {
+      Execute(i, columns-1, 0);
+      return;
+    }
+  }
+  for (int j = 0; j < columns; j++) {
+    if (map_state[0][j] == '?') {
+      Execute(0, j, 0);
+      return;
+    }
+    if (map_state[rows-1][j] == '?') {
+      Execute(rows-1, j, 0);
+      return;
+    }
+  }
+  
+  // Last resort: visit any unknown cell
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (map_state[i][j] == '?') {
+        Execute(i, j, 0);
+        return;
+      }
+    }
+  }
 }
 
 #endif
