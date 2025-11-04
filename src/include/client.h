@@ -16,6 +16,8 @@ bool is_known_mine[35][35];  // Whether we know a cell is a mine
 bool is_visited_cell[35][35];  // Whether a cell has been visited
 int unknown_neighbors[35][35];  // Count of unknown neighbors for each cell
 int marked_neighbors[35][35];   // Count of marked neighbors for each cell
+bool is_safe[35][35];  // Cells we've determined are safe
+bool needs_marking[35][35];  // Cells we've determined are mines
 
 /**
  * @brief The definition of function Execute(int, int, bool)
@@ -49,6 +51,8 @@ void InitGame() {
       is_visited_cell[i][j] = false;
       unknown_neighbors[i][j] = 0;
       marked_neighbors[i][j] = 0;
+      is_safe[i][j] = false;
+      needs_marking[i][j] = false;
     }
   }
   
@@ -119,29 +123,49 @@ void ReadMap() {
  * mind and make your decision here! Caution: you can only execute once in this function.
  */
 void Decide() {
-  // Multi-pass strategy with iterative reasoning
-  bool found_action = true;
+  // Advanced constraint solving with multiple passes
+  bool made_progress = true;
+  int max_iterations = 10;
   
-  while (found_action) {
-    found_action = false;
+  while (made_progress && max_iterations-- > 0) {
+    made_progress = false;
     
-    // Pass 1: Find cells we can safely mark as mines
-    // If a numbered cell has N unknown neighbors and needs N more mines, mark all unknown as mines
-    for (int i = 0; i < rows && !found_action; i++) {
-      for (int j = 0; j < columns && !found_action; j++) {
+    // Reset deduction arrays
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < columns; j++) {
+        is_safe[i][j] = false;
+        needs_marking[i][j] = false;
+      }
+    }
+    
+    // Phase 1: Single-cell constraint analysis
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < columns; j++) {
         if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
           int mine_count = map_state[i][j] - '0';
           int remaining_mines = mine_count - marked_neighbors[i][j];
           
           if (remaining_mines > 0 && remaining_mines == unknown_neighbors[i][j]) {
             // All unknown neighbors must be mines
-            for (int di = -1; di <= 1 && !found_action; di++) {
-              for (int dj = -1; dj <= 1 && !found_action; dj++) {
+            for (int di = -1; di <= 1; di++) {
+              for (int dj = -1; dj <= 1; dj++) {
                 if (di == 0 && dj == 0) continue;
                 int ni = i + di, nj = j + dj;
                 if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
-                  Execute(ni, nj, 1);  // Mark as mine
-                  return;
+                  needs_marking[ni][nj] = true;
+                  made_progress = true;
+                }
+              }
+            }
+          } else if (mine_count == marked_neighbors[i][j] && unknown_neighbors[i][j] > 0) {
+            // All mines found, safe to visit unknown neighbors
+            for (int di = -1; di <= 1; di++) {
+              for (int dj = -1; dj <= 1; dj++) {
+                if (di == 0 && dj == 0) continue;
+                int ni = i + di, nj = j + dj;
+                if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+                  is_safe[ni][nj] = true;
+                  made_progress = true;
                 }
               }
             }
@@ -150,26 +174,44 @@ void Decide() {
       }
     }
     
-    // Pass 2: Find cells we can safely visit
-    // If a numbered cell has all its mines marked, we can safely visit all unknown neighbors
-    for (int i = 0; i < rows && !found_action; i++) {
-      for (int j = 0; j < columns && !found_action; j++) {
-        if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
-          int mine_count = map_state[i][j] - '0';
-          
-          if (mine_count == marked_neighbors[i][j] && unknown_neighbors[i][j] > 0) {
-            // All mines found, safe to visit unknown neighbors
-            for (int di = -1; di <= 1 && !found_action; di++) {
-              for (int dj = -1; dj <= 1 && !found_action; dj++) {
-                if (di == 0 && dj == 0) continue;
-                int ni = i + di, nj = j + dj;
-                if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
-                  Execute(ni, nj, 0);  // Visit
-                  return;
-                }
-              }
-            }
+    // Phase 2: Pattern matching for common configurations
+    // Pattern: 1-2-1 or 1-1 patterns
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < columns; j++) {
+        if (is_visited_cell[i][j] && map_state[i][j] == '1') {
+          // Check for 1-2-1 pattern horizontally
+          if (j + 2 < columns && is_visited_cell[i][j+2] && map_state[i][j+2] == '1' &&
+              is_visited_cell[i][j+1] && map_state[i][j+1] == '2') {
+            // Middle cell neighbors (not shared with edges) are safe
+            if (i > 0 && map_state[i-1][j+1] == '?') is_safe[i-1][j+1] = true;
+            if (i < rows-1 && map_state[i+1][j+1] == '?') is_safe[i+1][j+1] = true;
           }
+          // Check for 1-2-1 pattern vertically
+          if (i + 2 < rows && is_visited_cell[i+2][j] && map_state[i+2][j] == '1' &&
+              is_visited_cell[i+1][j] && map_state[i+1][j] == '2') {
+            if (j > 0 && map_state[i+1][j-1] == '?') is_safe[i+1][j-1] = true;
+            if (j < columns-1 && map_state[i+1][j+1] == '?') is_safe[i+1][j+1] = true;
+          }
+        }
+      }
+    }
+    
+    // Execute marked mines first
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < columns; j++) {
+        if (needs_marking[i][j] && map_state[i][j] == '?') {
+          Execute(i, j, 1);
+          return;
+        }
+      }
+    }
+    
+    // Execute safe cells
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < columns; j++) {
+        if (is_safe[i][j] && map_state[i][j] == '?') {
+          Execute(i, j, 0);
+          return;
         }
       }
     }
