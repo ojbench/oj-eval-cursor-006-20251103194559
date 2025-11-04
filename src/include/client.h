@@ -119,25 +119,54 @@ void ReadMap() {
  * mind and make your decision here! Caution: you can only execute once in this function.
  */
 void Decide() {
-  // Strategy: Use logical deduction to find safe moves
+  // Multi-pass strategy with iterative reasoning
+  bool found_action = true;
   
-  // Step 1: Find cells we can safely mark as mines
-  // If a numbered cell has N unknown neighbors and needs N more mines, mark all unknown as mines
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < columns; j++) {
-      if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
-        int mine_count = map_state[i][j] - '0';
-        int remaining_mines = mine_count - marked_neighbors[i][j];
-        
-        if (remaining_mines > 0 && remaining_mines == unknown_neighbors[i][j]) {
-          // All unknown neighbors must be mines
-          for (int di = -1; di <= 1; di++) {
-            for (int dj = -1; dj <= 1; dj++) {
-              if (di == 0 && dj == 0) continue;
-              int ni = i + di, nj = j + dj;
-              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
-                Execute(ni, nj, 1);  // Mark as mine
-                return;
+  while (found_action) {
+    found_action = false;
+    
+    // Pass 1: Find cells we can safely mark as mines
+    // If a numbered cell has N unknown neighbors and needs N more mines, mark all unknown as mines
+    for (int i = 0; i < rows && !found_action; i++) {
+      for (int j = 0; j < columns && !found_action; j++) {
+        if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
+          int mine_count = map_state[i][j] - '0';
+          int remaining_mines = mine_count - marked_neighbors[i][j];
+          
+          if (remaining_mines > 0 && remaining_mines == unknown_neighbors[i][j]) {
+            // All unknown neighbors must be mines
+            for (int di = -1; di <= 1 && !found_action; di++) {
+              for (int dj = -1; dj <= 1 && !found_action; dj++) {
+                if (di == 0 && dj == 0) continue;
+                int ni = i + di, nj = j + dj;
+                if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+                  Execute(ni, nj, 1);  // Mark as mine
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Pass 2: Find cells we can safely visit
+    // If a numbered cell has all its mines marked, we can safely visit all unknown neighbors
+    for (int i = 0; i < rows && !found_action; i++) {
+      for (int j = 0; j < columns && !found_action; j++) {
+        if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
+          int mine_count = map_state[i][j] - '0';
+          
+          if (mine_count == marked_neighbors[i][j] && unknown_neighbors[i][j] > 0) {
+            // All mines found, safe to visit unknown neighbors
+            for (int di = -1; di <= 1 && !found_action; di++) {
+              for (int dj = -1; dj <= 1 && !found_action; dj++) {
+                if (di == 0 && dj == 0) continue;
+                int ni = i + di, nj = j + dj;
+                if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
+                  Execute(ni, nj, 0);  // Visit
+                  return;
+                }
               }
             }
           }
@@ -146,31 +175,7 @@ void Decide() {
     }
   }
   
-  // Step 2: Find cells we can safely visit
-  // If a numbered cell has all its mines marked, we can safely visit all unknown neighbors
-  for (int i = 0; i < rows; i++) {
-    for (int j = 0; j < columns; j++) {
-      if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
-        int mine_count = map_state[i][j] - '0';
-        
-        if (mine_count == marked_neighbors[i][j] && unknown_neighbors[i][j] > 0) {
-          // All mines found, safe to visit unknown neighbors
-          for (int di = -1; di <= 1; di++) {
-            for (int dj = -1; dj <= 1; dj++) {
-              if (di == 0 && dj == 0) continue;
-              int ni = i + di, nj = j + dj;
-              if (ni >= 0 && ni < rows && nj >= 0 && nj < columns && map_state[ni][nj] == '?') {
-                Execute(ni, nj, 0);  // Visit
-                return;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  // Step 3: Try auto-explore on visited cells
+  // Step 3: Try auto-explore on cells where all mines are marked
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < columns; j++) {
       if (is_visited_cell[i][j] && map_state[i][j] >= '0' && map_state[i][j] <= '8') {
@@ -183,37 +188,58 @@ void Decide() {
     }
   }
   
-  // Step 4: If no obvious safe move, visit a corner or edge cell (safer statistically)
-  // Try corners first
-  int corners[4][2] = {{0, 0}, {0, columns-1}, {rows-1, 0}, {rows-1, columns-1}};
-  for (int k = 0; k < 4; k++) {
-    int ci = corners[k][0], cj = corners[k][1];
-    if (map_state[ci][cj] == '?') {
-      Execute(ci, cj, 0);
-      return;
+  // Step 4: Advanced probability-based guessing
+  // Find the cell with lowest probability of being a mine
+  int best_i = -1, best_j = -1;
+  double min_mine_prob = 2.0;
+  
+  for (int i = 0; i < rows; i++) {
+    for (int j = 0; j < columns; j++) {
+      if (map_state[i][j] == '?') {
+        // Calculate mine probability based on neighbors
+        int total_weight = 0;
+        int mine_weight = 0;
+        
+        for (int di = -1; di <= 1; di++) {
+          for (int dj = -1; dj <= 1; dj++) {
+            if (di == 0 && dj == 0) continue;
+            int ni = i + di, nj = j + dj;
+            if (ni >= 0 && ni < rows && nj >= 0 && nj < columns) {
+              if (is_visited_cell[ni][nj] && map_state[ni][nj] >= '0' && map_state[ni][nj] <= '8') {
+                int mc = map_state[ni][nj] - '0';
+                int remaining = mc - marked_neighbors[ni][nj];
+                int unknown = unknown_neighbors[ni][nj];
+                
+                if (unknown > 0) {
+                  total_weight++;
+                  mine_weight += remaining;
+                }
+              }
+            }
+          }
+        }
+        
+        double prob = (total_weight > 0) ? (double)mine_weight / total_weight : 0.5;
+        
+        // Prefer corners and edges
+        bool is_corner = (i == 0 || i == rows-1) && (j == 0 || j == columns-1);
+        bool is_edge = (i == 0 || i == rows-1 || j == 0 || j == columns-1);
+        
+        if (is_corner) prob *= 0.7;
+        else if (is_edge) prob *= 0.85;
+        
+        if (prob < min_mine_prob) {
+          min_mine_prob = prob;
+          best_i = i;
+          best_j = j;
+        }
+      }
     }
   }
   
-  // Try edges
-  for (int i = 0; i < rows; i++) {
-    if (map_state[i][0] == '?') {
-      Execute(i, 0, 0);
-      return;
-    }
-    if (map_state[i][columns-1] == '?') {
-      Execute(i, columns-1, 0);
-      return;
-    }
-  }
-  for (int j = 0; j < columns; j++) {
-    if (map_state[0][j] == '?') {
-      Execute(0, j, 0);
-      return;
-    }
-    if (map_state[rows-1][j] == '?') {
-      Execute(rows-1, j, 0);
-      return;
-    }
+  if (best_i != -1) {
+    Execute(best_i, best_j, 0);
+    return;
   }
   
   // Last resort: visit any unknown cell
